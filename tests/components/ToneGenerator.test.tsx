@@ -1,6 +1,7 @@
 import { afterEach,describe,it,expect,vi } from 'vitest';
 import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import { ToneGenerator } from '@/components/toneLab/ToneGenerator';
+import { toneTemplateFixture } from '../helpers/toneTemplate';
 import { generateBluesTone } from '@/core/toneLab/tones';
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('Generate Tone panel',()=>{
@@ -27,4 +28,20 @@ describe('Generate Tone panel',()=>{
     fireEvent.change(screen.getByLabelText('Paste tone JSON'),{target:{value:'{"sendToUSB":true}'}});fireEvent.click(screen.getByRole('button',{name:'Validate & import draft'}));
     expect(screen.getByRole('alert')).toBeVisible();expect(screen.getByRole('heading',{name:'IMPORTED'})).toBeVisible();
   });
+  it('requires a compatible reviewed template before downloading either preset, with no MIDI access',async()=>{
+    const midi=vi.fn();Object.defineProperty(navigator,'requestMIDIAccess',{value:midi,configurable:true});
+    vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:vi.fn(()=> 'blob:preset'),revokeObjectURL:vi.fn()}));
+    const download=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+    render(<ToneGenerator/>);fireEvent.click(screen.getByRole('button',{name:/Generate Tone/}));fireEvent.click(screen.getByRole('button',{name:'Generate paired draft'}));
+    expect(screen.queryByRole('button',{name:/Export 01A/})).toBeNull();
+    const file=new File([toneTemplateFixture().buffer],'official-template.prst');
+    Object.defineProperty(file,'arrayBuffer',{value:async()=>toneTemplateFixture().buffer});
+    fireEvent.change(screen.getByLabelText('Official preset template'),{target:{files:[file]}});
+    const live=await screen.findByRole('button',{name:/Export 01A/});expect(live).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox'));expect(live).toBeEnabled();fireEvent.click(live);
+    fireEvent.click(screen.getByRole('button',{name:/Export 17A/}));expect(download).toHaveBeenCalledTimes(2);expect(midi).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Official preset template'),{target:{files:[new File(['bad'],'broken.prst')]}});
+    expect(await screen.findByRole('alert')).toHaveTextContent('1224-byte');expect(screen.queryByRole('button',{name:/Export 01A/})).toBeNull();
+  });
+
 });

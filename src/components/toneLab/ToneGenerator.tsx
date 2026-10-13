@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { controlRange, editTone, generateBluesTone, generationPrompt, importTone, REFERENCE, unresolvedControls, type TonePair } from '@/core/toneLab/tones';
+import { exportPresetPair, validateTemplate } from '@/core/toneLab/presetExport';
 import './toneLab.css';
 
 export function ToneGenerator(){
@@ -16,6 +17,28 @@ export function ToneGenerator(){
   const [tone,setTone]=useState<TonePair|null>(null);
   const [error,setError]=useState('');
   const [message,setMessage]=useState('');
+  const templateLoad=useRef(0);
+  const [template,setTemplate]=useState<Uint8Array|null>(null);
+  const [templateName,setTemplateName]=useState('');
+  const [confirmed,setConfirmed]=useState(false);
+  let files:ReturnType<typeof exportPresetPair>=[],fileError='';
+  if(tone&&template){try{files=exportPresetPair(tone,template);}catch(e){fileError=e instanceof Error?e.message:'Template cannot be used';}}
+  async function loadTemplate(file?:File){
+    const request=++templateLoad.current;
+    setTemplate(null);setTemplateName('');setConfirmed(false);setError('');
+    if(!file)return;
+    try{if(file.size!==1224)throw new Error('Use a full 1224-byte GP-200 .prst export.');
+      const bytes=new Uint8Array(await file.arrayBuffer());if(request!==templateLoad.current)return;validateTemplate(bytes);setTemplate(bytes);setTemplateName(file.name);
+    }catch(e){if(request===templateLoad.current)setError(e instanceof Error?e.message:'Unable to read template');}
+  }
+  function downloadPreset(index:number){
+    if(!tone||!template||!confirmed)return;
+    run(()=>{const file=exportPresetPair(tone,template)[index];
+      const url=URL.createObjectURL(new Blob([new Uint8Array(file.bytes).buffer],{type:'application/octet-stream'}));
+      const a=document.createElement('a');a.href=url;a.download=file.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setMessage(`${file.filename} exported. No MIDI was sent. Import and review it in the official editor before saving to the device.`);
+    });
+  }
   const run=(action:()=>void)=>{setError('');setMessage('');try{action();}catch(e){setError(e instanceof Error?e.message:'Unable to validate this tone');}};
   function exportTone(){
     if(!tone)return;
@@ -71,7 +94,17 @@ export function ToneGenerator(){
             <div className="tone-lab-parameters">{Object.entries(s.parameters).map(([key,value])=>{const r=controlRange(block,s.model!,key)!;return <label key={key}>{key.replaceAll('_',' ')}<input type="number" min={r[0]} max={r[1]} step={1} value={value} onChange={e=>run(()=>setTone(editTone(tone,profile.kind,block,key,e.target.valueAsNumber)))} /></label>;})}</div>
           </details>;})}
         </article>)}</div>
-        <div className="tone-lab-draft-note"><strong>Reviewable draft · hardware upload unavailable</strong><p>{unresolvedControls(tone).length?`Unresolved controls: ${unresolvedControls(tone).join('; ')}. Supply a manual row or screenshot before using these controls.`:'The draft passes the available manifest checks; device encoding and upload are not connected to this panel.'}</p><p>JSON exports work with Patch Lab’s draft importer. They are not .prst files. Existing Studio device controls are separate and remain experimental.</p></div>
+        <div className="tone-lab-card"><h3>Export GP-200 preset files</h3>
+          <p>In the official FW 1.8.0 editor, prepare a preset with Gate 3, Dark Twin amp, Dark Twin cab and Room reverb. Save and export it as a .prst template, then choose that file here.</p>
+          <label>Official preset template<input type="file" accept=".prst" onChange={e=>void loadTemplate(e.target.files?.[0])} /></label>
+          {templateName&&<p>Template: {templateName}</p>}
+          {fileError&&<p role="alert" className="tone-lab-error">{fileError}</p>}
+          {files.length>0&&<><p>BRIGHT and TRAIL keep their existing template settings. Expression/controller assignments, volume-pedal settings, FX loop, author and notes are also retained. Review these in the official editor.</p>
+            <label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} /> I exported this template using FW 1.8.0 and reviewed the settings it retains.</label>
+            <div className="tone-lab-fields">{files.map((file,index)=><button key={file.filename} disabled={!confirmed} onClick={()=>downloadPreset(index)}>Export {tone.profiles[index].bank} {tone.profiles[index].kind} .prst ↓</button>)}</div></>}
+          <p className="tone-lab-muted">File export only. The template stays unchanged, and no preset is selected or written on your GP-200.</p>
+        </div>
+        <div className="tone-lab-draft-note"><strong>Reviewable draft · hardware upload unavailable</strong><p>{unresolvedControls(tone).length?`Unresolved controls: ${unresolvedControls(tone).join('; ')}. These controls are not generated; compatible .prst exports preserve their template values. Supply a manual row or screenshot to edit them here.`:'The draft passes the available manifest checks; device encoding and upload are not connected to this panel.'}</p><p>Paired JSON works with Patch Lab’s draft importer. Preset-file export requires a compatible official template. Existing Studio device controls are separate and remain experimental.</p></div>
       </div>}
     </div>
   </section>;
