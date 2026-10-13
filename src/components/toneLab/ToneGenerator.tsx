@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { controlRange, editTone, generateBluesTone, generationPrompt, importTone, REFERENCE, unresolvedControls, type TonePair } from '@/core/toneLab/tones';
 import { exportPresetPair, validateTemplate } from '@/core/toneLab/presetExport';
+import { USBBackup } from './USBBackup';
 import './toneLab.css';
 
 export function ToneGenerator(){
@@ -87,6 +88,7 @@ export function ToneGenerator(){
           <p className="tone-lab-muted">The USB bank is always 16 higher with the same letter. Generating, editing or importing here sends no MIDI and does not change the editor’s loaded preset.</p>
         </div>
       </div>
+      <USBBackup liveBank={tone?.profiles[0].bank??bank}/>
       {tone && <div className="tone-lab-result">
         <header><div><p className="tone-lab-eyebrow">REVIEW YOUR DRAFT</p><h2>{tone.name}</h2><p>Preset volume {tone.presetVolume} · {tone.profiles.map(p=>p.bank).join(' / ')}</p></div><button className="tone-lab-primary" onClick={exportTone}>Export paired JSON ↓</button></header>
         <div className="tone-lab-grid">{tone.profiles.map(profile=><article className="tone-lab-card" key={profile.kind} aria-label={`${profile.kind} draft`}><header><h3>{profile.kind}</h3><span className="tone-lab-bank">{profile.bank}</span></header>

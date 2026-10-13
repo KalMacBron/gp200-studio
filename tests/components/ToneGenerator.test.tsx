@@ -38,7 +38,7 @@ describe('Generate Tone panel',()=>{
     Object.defineProperty(file,'arrayBuffer',{value:async()=>toneTemplateFixture().buffer});
     fireEvent.change(screen.getByLabelText('Official preset template'),{target:{files:[file]}});
     const live=await screen.findByRole('button',{name:/Export 01A/});expect(live).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));expect(live).toBeEnabled();fireEvent.click(live);
+    fireEvent.click(screen.getByRole('checkbox',{name:/I exported this template/}));expect(live).toBeEnabled();fireEvent.click(live);
     fireEvent.click(screen.getByRole('button',{name:/Export 17A/}));expect(download).toHaveBeenCalledTimes(2);expect(midi).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Official preset template'),{target:{files:[new File(['bad'],'broken.prst')]}});
     expect(await screen.findByRole('alert')).toHaveTextContent('1224-byte');expect(screen.queryByRole('button',{name:/Export 01A/})).toBeNull();

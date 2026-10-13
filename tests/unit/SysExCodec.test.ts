@@ -244,9 +244,9 @@ describe('SysExCodec: parsePresetName', () => {
 const UPLOAD_FIXTURE = join(process.cwd(), 'dumps/prts/07-D Scotland Kiss.prst');
 const HAS_UPLOAD_FIXTURE = existsSync(UPLOAD_FIXTURE);
 
-describe.skipIf(!HAS_UPLOAD_FIXTURE)('SysExCodec: flash upload (buildUploadImage / buildUploadChunks)', () => {
-  // Format ground truth: dumps/patch-upload.pcapng (official editor writing
-  // a patch to slot 9). Fixture: a real device export (1224 bytes).
+describe.skipIf(!HAS_UPLOAD_FIXTURE)('SysExCodec: historical offline upload image', () => {
+  // Historical upstream assumptions only; the referenced capture is absent.
+  // Current official-editor framing tests live in toneOfflineUpload.test.ts.
   // The read stays lazy: a skipped describe still evaluates its body at
   // collection time, so an unguarded readFileSync here would fail the file.
   const fileBytes = HAS_UPLOAD_FIXTURE
@@ -281,33 +281,9 @@ describe.skipIf(!HAS_UPLOAD_FIXTURE)('SysExCodec: flash upload (buildUploadImage
     expect(name).toBe('Scotland Kiss');
   });
 
-  it('frames the image as 7 chunks with 183-byte strides and 7-bit offsets', () => {
+  it('refuses the retired upload framing even when a historical fixture is available', () => {
     const image = SysExCodec.buildUploadImage(fileBytes);
-    const chunks = SysExCodec.buildUploadChunks(image, 9);
-    expect(chunks).toHaveLength(7);
-    expect(chunks.map((chunk) => chunk.length)).toEqual([380, 380, 380, 380, 380, 380, 186]);
-    const offsets = chunks.map((chunk) => chunk[12] * 128 + chunk[11]);
-    expect(offsets).toEqual([0, 183, 366, 549, 732, 915, 1098]);
-    for (const chunk of chunks) {
-      expect(Array.from(chunk.subarray(0, 10))).toEqual([
-        0xF0, 0x21, 0x25, 0x7E, 0x47, 0x50, 0x2D, 0x32, 0x12, 0x20,
-      ]);
-      expect(chunk[10]).toBe(9); // target slot
-      expect(chunk[chunk.length - 1]).toBe(0xF7);
-      const payload = Array.from(chunk.subarray(13, chunk.length - 1));
-      expect(payload.every((nibble) => nibble < 0x10)).toBe(true);
-    }
-  });
-
-  it('round-trips: reassembled chunk nibbles decode back to the image', () => {
-    const image = SysExCodec.buildUploadImage(fileBytes);
-    const chunks = SysExCodec.buildUploadChunks(image, 0);
-    const nibbles: number[] = [];
-    for (const chunk of chunks) {
-      for (let i = 13; i < chunk.length - 1; i++) nibbles.push(chunk[i]);
-    }
-    const decoded = SysExCodec.nibbleDecode(new Uint8Array(nibbles));
-    expect(Array.from(decoded)).toEqual(Array.from(image));
+    expect(() => SysExCodec.buildUploadChunks(image, 9)).toThrow('locked');
   });
 });
 

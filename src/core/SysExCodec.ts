@@ -280,22 +280,10 @@ export const SysExCodec = {
     return this.parsePresetFromDecoded(decoded);
   },
 
-  /**
-   * Assemble the flash-upload image for a preset from its encoded `.prst`
-   * file bytes (PRSTEncoder output or a raw imported file).
-   *
-   * Ground truth: dumps/patch-upload.pcapng (official editor pushing a patch
-   * to slot 9/"3B", 2026-07-18). The image is NOT the whole file:
-   *   [0:16]  two fixed TLV records `00 00 04 00 01 00 FF 00` +
-   *           `01 00 04 00 FF 00 FF 00` (a write preamble the file lacks)
-   *   [16:]   the file content from 0x30 (the `02 00 58 00` metadata TLV)
-   *           up to but excluding the trailing 8 bytes (the `C0 04 ...`
-   *           footer + BE16 checksum) , verified byte-for-byte against the
-   *           capture, whose image tail equals the file's last CTRL record.
-   *   [20]    the in-file slot-mirror byte is blanked to 0xFF: the capture
-   *           shows the editor sends FF here even when writing to slot 9;
-   *           the target slot lives in each chunk's SysEx header instead.
-   * A 1224-byte user file therefore yields a 1184-byte image.
+  /** Historical FF-addressed image retained for offline comparison only.
+   * The referenced upstream capture is not distributed in this checkout.
+   * Its target-in-envelope claim conflicts with the official 1.8.0 sender.
+   * buildUploadChunks always rejects it; do not transmit this candidate.
    */
   buildUploadImage(fileBytes: Uint8Array): Uint8Array {
     const FOOTER_LEN = 8; // C0 04 00 00 00 00 + 2-byte checksum
@@ -311,30 +299,13 @@ export const SysExCodec = {
     return image;
   },
 
-  /**
-   * Frame an upload image as 0x12/0x20 flash-write chunks for `slot`.
-   * Per the same capture: 183 raw bytes per chunk (366 nibbles), target slot
-   * at byte[10], and the RAW-image offset 7-bit-split at [11] (low) / [12]
-   * (high) , offset = b12*128 + b11. A 1184-byte image yields 7 chunks
-   * (6×380B + 1×186B frames). The device commits to flash directly; no
-   * save-commit follows (hardware-verified: survives power-cycle).
+  /** Retired unsafe flash writer. Official FW 1.8.0 analysis established
+   * that envelope bytes 9/10 are total length, not a destination slot.
+   * A replacement lives only in the offline protocol lab until persistence
+   * and recovery are verified. No hidden experiment setting enables this.
    */
-  buildUploadChunks(image: Uint8Array, slot: number): Uint8Array[] {
-    const CHUNK_RAW = 183;
-    const chunks: Uint8Array[] = [];
-    for (let off = 0; off < image.length; off += CHUNK_RAW) {
-      const raw = image.subarray(off, Math.min(off + CHUNK_RAW, image.length));
-      const nibble = this.nibbleEncode(raw);
-      const msg = new Uint8Array(13 + nibble.length + 1);
-      msg.set([0xF0, 0x21, 0x25, 0x7E, 0x47, 0x50, 0x2D, 0x32, 0x12, 0x20]);
-      msg[10] = slot & 0x7F;
-      msg[11] = off & 0x7F;
-      msg[12] = (off >> 7) & 0x7F;
-      msg.set(nibble, 13);
-      msg[msg.length - 1] = 0xF7;
-      chunks.push(msg);
-    }
-    return chunks;
+  buildUploadChunks(_image: Uint8Array, _slot: number): Uint8Array[] {
+    throw new Error('USB preset uploads are locked: legacy framing was incorrect. Use file export while the replacement save path is verified.');
   },
 
   buildIdentityQuery(): Uint8Array {

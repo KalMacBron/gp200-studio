@@ -12,7 +12,6 @@ import type { CCCommand } from '@/core/ccControl';
 import { presetNameCacheKey, loadCachedNames, saveCachedNames } from '@/core/presetNameCache';
 import type { BulkApplyOptions, BulkApplyProgress } from '@/core/bulkApply';
 import { track } from '@/core/analytics';
-import { PRSTEncoder } from '@/core/PRSTEncoder';
 import {
   describeHandshakeSilence,
   describeMidiAccessDenied,
@@ -766,111 +765,11 @@ export function useMidiDevice(): UseMidiDeviceReturn {
     });
   }, [onMidiMessage, pauseNameLoading]);
 
-  const pushPreset = useCallback(async (preset: GP200Preset, slot: number): Promise<void> => {
-    await pauseNameLoading();
-    if (!outputRef.current) throw new Error('Not connected');
-    console.log(`[GP-200] push: slot=${slot} (${SysExCodec.slotToLabel(slot)}) name="${preset.patchName}"`);
-
-    // Flash upload, mirroring the official editor byte-for-byte
-    // (dumps/patch-upload.pcapng): encode to .prst bytes, derive the upload
-    // image, send it as 0x12/0x20 chunks addressed to the target slot. The
-    // device commits to flash directly , no save-commit follows (verified:
-    // the uploaded patch survives a power-cycle). Because the image carries
-    // the full file content, CTRL/EXP assignments travel with it.
-    const fileBytes = new Uint8Array(new PRSTEncoder().encode(preset));
-    const image = SysExCodec.buildUploadImage(fileBytes);
-    const chunks = SysExCodec.buildUploadChunks(image, slot);
-    // The device echoes lone 0xF7 acks during the burst; mute FX-state
-    // handling so nothing downstream misreads upload traffic, and ignore the
-    // preset-change echoes our park/return hops produce below.
-    suppressFxFor(3000);
-    suppressSlotEchoUntilRef.current = Date.now() + 3000;
-
-    // The capture (dumps/patch-upload.pcapng) only ever writes to a slot the
-    // device is NOT sitting on; the user re-selects it manually afterwards.
-    // Writing to the active slot looked like a no-op in hardware testing:
-    // the edit buffer keeps serving the pre-push patch and a preset-change
-    // to the current slot doesn't reload it. So park on the adjacent
-    // sub-slot first, write, then return , the return is a real slot change
-    // that loads the freshly written flash copy.
-    const wasActive = currentSlotRef.current === slot;
-    if (wasActive) {
-      const parkSlot = slot ^ 1; // same bank, adjacent sub-slot
-      console.log(`[GP-200] push: parking on slot=${parkSlot} while writing active slot`);
-      outputRef.current.send(SysExCodec.buildPresetChange(parkSlot));
-      await new Promise(r => setTimeout(r, 300));
-    }
-
-    for (let i = 0; i < chunks.length; i++) {
-      console.log(`[GP-200] push chunk ${i + 1}/${chunks.length}: ${chunks[i].length}B`);
-      outputRef.current.send(chunks[i]);
-      await new Promise(r => setTimeout(r, 20));
-    }
-
-    // Let the flash write settle, then switch the device to the slot so the
-    // pushed patch is live (the editor leaves this to the user; we select
-    // it). Hardware testing showed the device goes deaf for a while after
-    // the chunk burst , a preset-change 200ms later was silently dropped —
-    // so give it a generous window.
-    await new Promise(r => setTimeout(r, 800));
-
-    // Experiment toggle: the upload capture stops 30ms after the last chunk,
-    // so a deferred finalize frame from the official editor would be
-    // invisible in it. Hardware runs show the device answering reads but
-    // discarding the upload + refusing slot changes after the burst , the
-    // signature of staged data awaiting a commit. Opt in to sending the
-    // known save-commit opcode as that finalize via
-    // localStorage.setItem('gp200.pushCommit', '1'). CAUTION: if the device
-    // treats it as a plain edit-buffer save instead, the target slot gets
-    // overwritten with the currently active patch , use a scratch slot.
-    let commitRequested = false;
-    try {
-      commitRequested = window.localStorage.getItem('gp200.pushCommit') === '1';
-    } catch {
-      commitRequested = false;
-    }
-    if (commitRequested) {
-      console.log('[GP-200] push: sending save-commit finalize (experiment gp200.pushCommit)');
-      outputRef.current.send(SysExCodec.buildSaveCommit(preset.patchName, slot));
-      await new Promise(r => setTimeout(r, 400));
-    }
-    console.log(`[GP-200] push preset-change: slot=${slot}`);
-    outputRef.current.send(SysExCodec.buildPresetChange(slot));
-
-    // Update local state
-    presetNamesRef.current[slot] = preset.patchName;
-    setPresetNames([...presetNamesRef.current]);
-    persistNames();
-    setCurrentSlot(slot); currentSlotRef.current = slot;
-
-    // Read the slot back and compare, so a discarded write is loud in the
-    // console instead of silently reverting on the next pull.
-    await new Promise(r => setTimeout(r, 400));
-    try {
-      const readback = await pullPreset(slot);
-      const nameOk = readback.patchName === preset.patchName;
-      const masksOf = (candidate: GP200Preset) =>
-        candidate.ctrlAssignments?.map((assignment) => assignment.blockMask).join(',') ?? null;
-      const wantMasks = masksOf(preset);
-      const gotMasks = masksOf(readback);
-      const ctrlOk = wantMasks === null || wantMasks === gotMasks;
-      if (nameOk && ctrlOk) {
-        console.log('[GP-200] push verify: OK (readback matches pushed name + CTRL masks)');
-      } else {
-        console.warn(
-          `[GP-200] push verify: MISMATCH , name "${readback.patchName}" vs pushed ` +
-          `"${preset.patchName}", ctrlMasks [${gotMasks}] vs pushed [${wantMasks}]. ` +
-          'The device likely discarded the flash write.',
-        );
-      }
-    } catch (err) {
-      console.warn('[GP-200] push verify: readback failed', err);
-    }
-
-    console.log('[GP-200] push complete');
-    // suppressFxFor is a plain per-render function, but unlike onMidiMessage
-    // nothing depends on pushPreset's identity, so listing it is harmless.
-  }, [pauseNameLoading, persistNames, suppressFxFor, pullPreset]);
+  // Do not park/select a preset, send a burst, or consult the inherited
+  // gp200.pushCommit experiment. The old flash envelope used slot as length.
+  const pushPreset = useCallback(async (_preset: GP200Preset, _slot: number): Promise<void> => {
+    throw new Error('USB preset uploads are locked while the replacement save path is verified. Export a .prst file for review in the official editor.');
+  }, []);
 
   const saveToSlot = useCallback(async (presetName: string, slot?: number): Promise<void> => {
     if (!outputRef.current) return;
