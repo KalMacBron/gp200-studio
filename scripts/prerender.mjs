@@ -46,8 +46,8 @@ const ROOT_DIV = '<div id="root"></div>';
 function buildSsr() {
   console.log('Building SSR bundle…');
   execFileSync(
-    'npx',
-    ['vite', 'build', '--ssr', 'src/prerender/entry-server.tsx', '--outDir', 'dist-ssr', '--logLevel', 'warn'],
+    process.execPath,
+    [join(ROOT, 'node_modules/vite/bin/vite.js'), 'build', '--ssr', 'src/prerender/entry-server.tsx', '--outDir', 'dist-ssr', '--logLevel', 'warn'],
     { cwd: ROOT, stdio: 'inherit' },
   );
 }
